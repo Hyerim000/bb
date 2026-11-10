@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>바코드 상품 찾기</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#eef7ff;color:#19324a;font-family:system-ui,"Apple SD Gothic Neo",sans-serif;display:grid;place-items:center;padding:18px}
+main{width:min(900px,100%);background:white;border-radius:28px;padding:clamp(18px,4vw,42px);box-shadow:0 8px 30px #24486618;text-align:center}
+h1{font-size:clamp(26px,5vw,42px);margin:0 0 8px}
+p{color:#587187;line-height:1.55}
+.status{display:inline-block;background:#e4f5e8;color:#247a42;border-radius:999px;padding:8px 14px;font-weight:700;margin:12px}
+.scanbox{background:#f1f8ff;border:3px dashed #9bc9ed;border-radius:22px;padding:clamp(16px,3vw,30px);margin-top:16px}
+#scanInput{width:100%;font-size:clamp(20px,4vw,32px);padding:16px;border:2px solid #9bc9ed;border-radius:14px;text-align:center;outline:none}
+#scanInput:focus{border-color:#287fc1;box-shadow:0 0 0 4px #287fc122}
+.label{font-size:15px;font-weight:700;color:#587187;margin:16px 0 7px}
+#result{font-size:clamp(28px,6vw,54px);font-weight:850;overflow-wrap:anywhere;min-height:1.25em;color:#155c9a}
+#productCard{margin:20px auto 4px;padding:20px;background:#fff;border:2px solid #e0edf7;border-radius:20px;max-width:560px;display:none}
+#productImage{width:min(100%,320px);height:260px;object-fit:contain;display:block;margin:0 auto 14px;border-radius:12px;background:white}
+#productName{font-size:clamp(22px,4vw,32px);font-weight:850;color:#19324a;margin:8px 0}
+#productBrand{font-size:17px;color:#587187}
+#lookupNote{font-size:14px;color:#71869a;margin-top:12px}
+button{border:0;border-radius:13px;background:#287fc1;color:white;font-size:17px;font-weight:750;padding:13px 22px;margin:8px;cursor:pointer}
+button.gray{background:#e7edf2;color:#29445a}
+.hint{font-size:14px;line-height:1.6;margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+ <h1>📦 바코드 상품 찾기</h1>
+ <p>바코드를 찍으면 번호와 상품 이름, 등록된 상품 사진을 아래에 보여줘요.</p>
+ <div class="status" id="status">● 스캔 대기 중</div>
+ <div class="scanbox">
+  <div class="label">바코드 입력</div>
+  <input id="scanInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="이 칸을 누르고 바코드를 찍으세요">
+  <div class="label">인식된 바코드 번호</div>
+  <div id="result" aria-live="polite">아직 스캔 전이에요</div>
+  <div id="productCard" aria-live="polite">
+   <img id="productImage" alt="상품 사진" hidden>
+   <div id="productName"></div>
+   <div id="productBrand"></div>
+   <div id="lookupNote"></div>
+  </div>
+  <div id="time" class="hint"></div>
+ </div>
+ <button onclick="focusScanner()">다시 스캔하기</button>
+ <button class="gray" onclick="clearResult()">화면 지우기</button>
+ <p class="hint">※ 상품 이름과 사진은 인터넷 상품 정보에서 찾아와요. 데이터베이스에 등록되지 않은 상품은 사진이 나오지 않을 수 있어요. 상품 검색을 위해 인터넷 연결이 필요해요.</p>
+</main>
+<script>
+const input=document.getElementById('scanInput');
+const result=document.getElementById('result');
+const statusEl=document.getElementById('status');
+const timeEl=document.getElementById('time');
+const card=document.getElementById('productCard');
+const productImage=document.getElementById('productImage');
+const productName=document.getElementById('productName');
+const productBrand=document.getElementById('productBrand');
+const lookupNote=document.getElementById('lookupNote');
+let timer=null, lastLookup='', requestNumber=0;
+function setStatus(text,done=false){statusEl.textContent='● '+text;statusEl.style.background=done?'#e4f5e8':'#fff2d8';statusEl.style.color=done?'#247a42':'#93600b';}
+function showValue(){
+ const value=input.value.trim();
+ if(!value)return;
+ result.textContent=value;
+ setStatus('바코드 입력 중');
+ clearTimeout(timer);
+ timer=setTimeout(()=>finishScan(value),500);
+}
+async function finishScan(value){
+ if(!value || value===lastLookup)return;
+ lastLookup=value;
+ const myRequest=++requestNumber;
+ setStatus('상품 정보 찾는 중');
+ timeEl.textContent='스캔 시간: '+new Date().toLocaleTimeString('ko-KR');
+ card.style.display='block';
+ productImage.hidden=true; productImage.removeAttribute('src');
+ productName.textContent='상품 정보를 찾고 있어요…';
+ productBrand.textContent=''; lookupNote.textContent='';
+ try{
+  const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(value)+'.json?product_type=all&fields=product_name,product_name_ko,generic_name,generic_name_ko,brands,image_front_url,image_url,image_front_small_url&lc=ko&cc=kr';
+  const response=await fetch(url,{headers:{'Accept':'application/json'}});
+  if(!response.ok)throw new Error('network');
+  const data=await response.json();
+  if(myRequest!==requestNumber)return;
+  const p=data && data.product;
+  if(data.status===1 && p){
+   const name=p.product_name_ko || p.product_name || p.generic_name_ko || p.generic_name || '이름이 등록되지 않은 상품';
+   const brand=p.brands || '';
+   const photo=p.image_front_url || p.image_url || p.image_front_small_url || '';
+   productName.textContent=name;
+   productBrand.textContent=brand;
+   if(photo){productImage.src=photo;productImage.hidden=false;productImage.onerror=()=>{productImage.hidden=true;};}
+   lookupNote.textContent=photo?'상품 정보 데이터베이스에서 찾았어요.':'상품 이름은 찾았지만 사진은 등록되어 있지 않아요.';
+   setStatus('인식 완료',true);
+  }else{
+   productName.textContent='상품 정보를 찾을 수 없어요';
+   productBrand.textContent='이 바코드는 상품 정보 데이터베이스에 등록되어 있지 않을 수 있어요.';
+   lookupNote.textContent='바코드 번호는 정상적으로 읽혔어요.';
+   setStatus('바코드 인식 완료',true);
+  }
+ }catch(err){
+  if(myRequest!==requestNumber)return;
+  productName.textContent='상품 정보를 불러오지 못했어요';
+  productBrand.textContent='인터넷 연결을 확인한 뒤 다시 스캔해 주세요.';
+  lookupNote.textContent='바코드 번호 자체는 읽혔어요.';
+  setStatus('상품 조회 실패',true);
+ }
+}
+input.addEventListener('input',showValue);
+input.addEventListener('keydown',e=>{
+ if(e.key==='Enter'){
+  e.preventDefault();clearTimeout(timer);
+  const value=input.value.trim();
+  if(value)finishScan(value);
+  input.select();
+ }
+});
+function focusScanner(){input.focus();input.select();}
+function clearResult(){
+ clearTimeout(timer);requestNumber++;lastLookup='';input.value='';result.textContent='아직 스캔 전이에요';
+ card.style.display='none';productImage.hidden=true;productImage.removeAttribute('src');
+ productName.textContent='';productBrand.textContent='';lookupNote.textContent='';timeEl.textContent='';
+ setStatus('스캔 대기 중',true);focusScanner();
+}
+window.addEventListener('load',focusScanner);
+document.addEventListener('click',e=>{if(e.target.tagName!=='BUTTON'&&e.target!==input)input.focus();});
+</script>
+</body>
+</html>
